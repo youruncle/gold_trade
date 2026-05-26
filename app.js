@@ -35,6 +35,7 @@ const assets = {
 
 const ranges = { "1D": 1, "1M": 30, "3M": 90, "1Y": 365, "5Y": 1260 };
 const storeKey = "metal-desk-account-v1";
+const alertStoreKey = "metal-desk-alerts-v1";
 const fmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 const money = value => `$${fmt.format(value)}`;
 const pct = value => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
@@ -45,8 +46,11 @@ let chartType = "line";
 let history = {};
 let intradayHistory = {};
 let dataErrors = {};
+let macroHistory = {};
+let macroErrors = {};
 let liveSource = "真实";
 let account = loadAccount();
+let alerts = loadAlerts();
 let chartState = null;
 let hoverIndex = null;
 
@@ -87,7 +91,14 @@ const els = {
   tradePlan: document.querySelector("#tradePlan"),
   strategySelect: document.querySelector("#strategySelect"),
   runBacktest: document.querySelector("#runBacktest"),
-  backtestResult: document.querySelector("#backtestResult")
+  backtestResult: document.querySelector("#backtestResult"),
+  macroGrid: document.querySelector("#macroGrid"),
+  macroText: document.querySelector("#macroText"),
+  tradeReason: document.querySelector("#tradeReason"),
+  alertForm: document.querySelector("#alertForm"),
+  alertDirection: document.querySelector("#alertDirection"),
+  alertPrice: document.querySelector("#alertPrice"),
+  alertList: document.querySelector("#alertList")
 };
 
 function loadAccount() {
@@ -101,6 +112,18 @@ function loadAccount() {
 
 function saveAccount() {
   localStorage.setItem(storeKey, JSON.stringify(account));
+}
+
+function loadAlerts() {
+  try {
+    return JSON.parse(localStorage.getItem(alertStoreKey)) || [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAlerts() {
+  localStorage.setItem(alertStoreKey, JSON.stringify(alerts));
 }
 
 async function fetchYahooSeries(assetKey) {
@@ -152,6 +175,34 @@ async function loadMarketData() {
   els.dataStatus.textContent = loaded
     ? `${liveSource}行情 ${loaded}/${keys.length} · Yahoo/COMEX · ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
     : "真实行情连接失败";
+}
+
+async function loadMacroData() {
+  try {
+    const response = await fetch("/api/macro", { cache: "no-store" });
+    if (!response.ok) throw new Error(`宏观代理返回 ${response.status}`);
+    const data = await response.json();
+    macroHistory = Object.fromEntries((data.items || []).map(item => [
+      item.key,
+      {
+        ...item,
+        points: item.points.map(point => ({
+          date: new Date(point.date),
+          price: point.price,
+          open: point.open ?? point.price,
+          high: point.high ?? point.price,
+          low: point.low ?? point.price,
+          close: point.close ?? point.price,
+          volume: point.volume ?? null
+        }))
+      }
+    ]));
+    macroErrors = data.errors || {};
+  } catch (error) {
+    macroHistory = {};
+    macroErrors = { macro: error.message || "宏观接口不可用" };
+  }
+  renderMacro();
 }
 
 function sliceSeries(key) {
@@ -350,7 +401,7 @@ function buildSignalRadar(series) {
   const momentumScore = clampScore(score === null ? 50 : score > 70 ? 38 : score < 35 ? 68 : 54 + Math.sign(threeMonth) * 12);
   const riskScore = clampScore(100 - vol * 1.8 - Math.max(0, -maxDrawdown(series, 252)) * 0.9);
   const locationScore = clampScore(50 + ((last - levels.support) / Math.max(levels.resistance - levels.support, 1)) * 25 - ((levels.resistance - last) / Math.max(levels.resistance - levels.support, 1)) * 20);
-  const macroProxy = clampScore(50 + Math.sign(oneYear) * 12 - (vol > 35 ? 10 : 0));
+  const macroProxy = buildMacroPressureScore(oneYear, vol);
   return [
     { name: "趋势", score: trendScore, note: ma20 && ma60 ? `MA20 ${ma20 > ma60 ? "高于" : "低于"} MA60` : "均线数据不足" },
     { name: "动量", score: momentumScore, note: score ? `RSI ${score.toFixed(1)}` : "RSI数据不足" },
@@ -358,6 +409,22 @@ function buildSignalRadar(series) {
     { name: "位置", score: locationScore, note: `${money(levels.support)} - ${money(levels.resistance)}` },
     { name: "宏观代理", score: macroProxy, note: `1年 ${formatNullablePct(oneYear)}` }
   ];
+}
+
+function buildMacroPressureScore(oneYear, vol) {
+  const dxy = periodReturn(macroHistory.dxy?.points || [], 21);
+  const tnx = periodReturn(macroHistory.tnx?.points || [], 21);
+  let score = 50 + Math.sign(oneYear) * 12 - (vol > 35 ? 10 : 0);
+  if (dxy !== null && dxy > 1.5) score -= 10;
+  if (dxy !== null && dxy < -1.5) score += 10;
+  if (tnx !== null && tnx > 5) score -= 8;
+  if (tnx !== null && tnx < -5) score += 8;
+  return clampScore(score);
+}
+
+function macroChange(key, days = 21) {
+  const points = macroHistory[key]?.points || [];
+  return periodReturn(points, days);
 }
 
 function buildTradePlan(series) {
@@ -863,6 +930,62 @@ function renderBacktest(series) {
   `;
 }
 
+function renderMacro() {
+  const items = Object.values(macroHistory);
+  if (!items.length) {
+    els.macroGrid.innerHTML = `<p class="empty">暂无宏观数据</p>`;
+    els.macroText.innerHTML = `<p>宏观代理暂不可用：${Object.values(macroErrors).join("；") || "等待连接"}</p>`;
+    return;
+  }
+
+  els.macroGrid.innerHTML = items.map(item => {
+    const latest = item.points.at(-1)?.price;
+    const change = periodReturn(item.points, 21);
+    return `
+      <div>
+        <span>${item.symbol}</span>
+        <strong>${Number.isFinite(latest) ? fmt.format(latest) : "--"}</strong>
+        <em class="${change === null ? "muted" : change >= 0 ? "up" : "down"}">${formatNullablePct(change)} · 1M</em>
+        <small>${item.name}</small>
+      </div>
+    `;
+  }).join("");
+
+  const dxy = macroChange("dxy");
+  const tnx = macroChange("tnx");
+  const gld = macroChange("gld");
+  const slv = macroChange("slv");
+  const pressure = [
+    dxy !== null && dxy > 1.5 ? "美元走强压制贵金属估值" : "",
+    dxy !== null && dxy < -1.5 ? "美元回落对贵金属形成支撑" : "",
+    tnx !== null && tnx > 5 ? "美债收益率上行提高持有黄金的机会成本" : "",
+    tnx !== null && tnx < -5 ? "美债收益率回落有利于贵金属" : "",
+    gld !== null && gld > 2 ? "黄金ETF同步走强，资金偏好改善" : "",
+    slv !== null && slv > 2 ? "白银ETF同步走强，工业金属情绪较好" : ""
+  ].filter(Boolean);
+  els.macroText.innerHTML = `<p>${pressure.length ? pressure.join("；") : "宏观代理信号暂未出现明显单边压力，仍以价格结构和风险预算为主。"}</p>`;
+}
+
+function renderAlerts() {
+  if (!alerts.length) {
+    els.alertList.innerHTML = `<p class="empty">暂无提醒</p>`;
+    return;
+  }
+  els.alertList.innerHTML = alerts.map(alert => {
+    const price = latestPrice(alert.asset);
+    const hit = Number.isFinite(price) && (alert.direction === "above" ? price >= alert.price : price <= alert.price);
+    return `
+      <div class="alert-row ${hit ? "triggered" : ""}">
+        <div>
+          <strong>${assets[alert.asset]?.ticker || alert.asset} ${alert.direction === "above" ? "高于" : "低于"} ${money(alert.price)}</strong>
+          <span>${hit ? "已触发" : `当前 ${Number.isFinite(price) ? money(price) : "--"}`}</span>
+        </div>
+        <button class="ghost" data-alert-remove="${alert.id}">删除</button>
+      </div>
+    `;
+  }).join("");
+}
+
 function renderTrading() {
   const hasUnpricedPosition = positions().some(position => !Number.isFinite(latestPrice(position.asset)));
   const totalEquity = account.cash + markToMarket();
@@ -896,6 +1019,7 @@ function renderTrading() {
       <div>
         <strong>${assets[trade.asset].name} · ${trade.side === "buy" ? "买入" : "卖出"}</strong>
         <span class="mini">${new Date(trade.time).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+        ${trade.reason ? `<span class="mini">${trade.reason}</span>` : ""}
       </div>
       <div><strong>${trade.qty.toFixed(2)}</strong><span class="mini">${money(trade.price)}</span></div>
     </div>
@@ -912,6 +1036,7 @@ function render() {
   renderSignalRadar(series);
   renderTradePlan(series);
   renderBacktest(series);
+  renderAlerts();
 }
 
 function placeTrade(event) {
@@ -924,9 +1049,18 @@ function placeTrade(event) {
   const side = els.side.value;
   const value = price * qty;
   account.cash += side === "buy" ? -value : value;
-  account.trades.push({ asset: activeAsset, side, qty, price, time: Date.now(), closed: false });
+  account.trades.push({
+    asset: activeAsset,
+    side,
+    qty,
+    price,
+    time: Date.now(),
+    closed: false,
+    reason: els.tradeReason.value.trim()
+  });
+  els.tradeReason.value = "";
   saveAccount();
-  renderTrading();
+  render();
 }
 
 function closePosition(assetKey) {
@@ -969,6 +1103,13 @@ document.addEventListener("click", event => {
 
   const closeButton = event.target.closest("[data-close]");
   if (closeButton) closePosition(closeButton.dataset.close);
+
+  const removeAlertButton = event.target.closest("[data-alert-remove]");
+  if (removeAlertButton) {
+    alerts = alerts.filter(alert => alert.id !== removeAlertButton.dataset.alertRemove);
+    saveAlerts();
+    renderAlerts();
+  }
 });
 
 els.tradeForm.addEventListener("submit", placeTrade);
@@ -1002,6 +1143,22 @@ els.riskPercent.addEventListener("input", () => renderTradePlan(history[activeAs
 els.strategySelect.addEventListener("change", () => renderBacktest(history[activeAsset]));
 els.runBacktest.addEventListener("click", () => renderBacktest(history[activeAsset]));
 
+els.alertForm.addEventListener("submit", event => {
+  event.preventDefault();
+  const price = Number(els.alertPrice.value);
+  if (!Number.isFinite(price) || price <= 0) return;
+  alerts.push({
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    asset: activeAsset,
+    direction: els.alertDirection.value,
+    price,
+    createdAt: Date.now()
+  });
+  els.alertPrice.value = "";
+  saveAlerts();
+  renderAlerts();
+});
+
 els.chart.addEventListener("pointermove", event => {
   if (!chartState) return;
   const rect = els.chart.getBoundingClientRect();
@@ -1018,6 +1175,8 @@ els.chart.addEventListener("pointerleave", () => {
 });
 
 loadMarketData();
+loadMacroData();
 setInterval(() => {
   loadMarketData();
+  loadMacroData();
 }, 60000);

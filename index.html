@@ -148,6 +148,17 @@
             <div class="backtest-grid" id="backtestResult"></div>
           </article>
 
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Macro Drivers</p>
+                <h2>宏观驱动</h2>
+              </div>
+            </div>
+            <div class="macro-grid" id="macroGrid"></div>
+            <div class="trend-copy" id="macroText"></div>
+          </article>
+
           <div class="insight-row">
             <article class="panel">
               <div class="panel-head">
@@ -187,8 +198,33 @@
                 数量
                 <input id="quantity" type="number" min="0.01" step="0.01" value="1" />
               </label>
+              <label>
+                交易理由
+                <textarea id="tradeReason" rows="3" placeholder="例如：突破阻力、回踩MA20、风险预算1%"></textarea>
+              </label>
               <button type="submit" class="primary">提交委托</button>
             </form>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>提醒</h2>
+            </div>
+            <form id="alertForm" class="trade-form">
+              <label>
+                条件
+                <select id="alertDirection">
+                  <option value="above">价格高于</option>
+                  <option value="below">价格低于</option>
+                </select>
+              </label>
+              <label>
+                价格
+                <input id="alertPrice" type="number" min="0" step="0.01" />
+              </label>
+              <button type="submit" class="primary">添加提醒</button>
+            </form>
+            <div class="alert-list" id="alertList"></div>
           </div>
 
           <div class="panel positions">

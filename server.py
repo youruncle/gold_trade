@@ -14,6 +14,13 @@ ASSETS = {
     "palladium": {"symbol": "PA=F", "name": "Palladium futures", "source": "Yahoo Finance / NYMEX"},
 }
 
+MACRO_ASSETS = {
+    "dxy": {"symbol": "DX-Y.NYB", "name": "美元指数", "source": "Yahoo Finance"},
+    "tnx": {"symbol": "^TNX", "name": "美国10年期收益率", "source": "Yahoo Finance"},
+    "gld": {"symbol": "GLD", "name": "GLD 黄金ETF", "source": "Yahoo Finance"},
+    "slv": {"symbol": "SLV", "name": "SLV 白银ETF", "source": "Yahoo Finance"},
+}
+
 CACHE = {}
 CACHE_TTL_SECONDS = 30
 ROOT = Path(__file__).resolve().parent
@@ -28,6 +35,9 @@ class MarketHandler(SimpleHTTPRequestHandler):
         if parsed.path.startswith("/api/market/"):
             asset_key = parsed.path.rsplit("/", 1)[-1]
             self.handle_market(asset_key)
+            return
+        if parsed.path == "/api/macro":
+            self.handle_macro()
             return
         super().do_GET()
 
@@ -52,6 +62,33 @@ class MarketHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": f"Market provider unavailable: {error.reason if hasattr(error, 'reason') else error}"}, 502)
         except ValueError as error:
             self.send_json({"error": str(error)}, 502)
+
+    def handle_macro(self):
+        cached = CACHE.get("macro")
+        if cached and time.time() - cached["time"] < CACHE_TTL_SECONDS:
+            self.send_json(cached["payload"])
+            return
+
+        payload = {"items": [], "errors": {}}
+        for key, asset in MACRO_ASSETS.items():
+            try:
+                symbol = asset["symbol"].replace("^", "%5E")
+                chart = fetch_yahoo_chart(symbol, "1y", "1d")
+                points = chart["points"]
+                if len(points) < 20:
+                    raise ValueError("Incomplete macro history")
+                payload["items"].append({
+                    "key": key,
+                    "symbol": asset["symbol"],
+                    "name": asset["name"],
+                    "source": asset["source"],
+                    "points": points,
+                })
+            except Exception as error:
+                payload["errors"][key] = str(error)
+
+        CACHE["macro"] = {"time": time.time(), "payload": payload}
+        self.send_json(payload)
 
     def send_json(self, payload, status=200):
         body = json.dumps(payload).encode("utf-8")

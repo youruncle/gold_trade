@@ -459,6 +459,43 @@ select:disabled {
   gap: 12px;
 }
 
+.macro-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.macro-grid div {
+  min-height: 92px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.macro-grid span,
+.macro-grid small,
+.macro-grid em,
+.alert-row span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.macro-grid strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 22px;
+}
+
+.macro-grid em,
+.macro-grid small {
+  margin-top: 5px;
+}
+
 .chart-panel {
   padding: 20px;
 }
@@ -578,7 +615,8 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 42px;
   padding: 9px 10px;
@@ -586,6 +624,10 @@ select {
   border-radius: 8px;
   background: #fff;
   color: var(--ink);
+}
+
+textarea {
+  resize: vertical;
 }
 
 .primary {
@@ -630,6 +672,33 @@ select {
   background: #fff5f5;
   color: var(--red);
   font-weight: 800;
+}
+
+.alert-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.alert-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.alert-row.triggered {
+  border-color: rgba(19, 121, 91, 0.35);
+  background: #eefaf5;
+}
+
+.alert-row strong {
+  display: block;
+  font-size: 13px;
 }
 
 .empty {
@@ -693,7 +762,8 @@ select {
   .ops-grid,
   .plan-grid,
   .backtest-grid,
-  .backtest-controls {
+  .backtest-controls,
+  .macro-grid {
     grid-template-columns: 1fr;
   }
 }
