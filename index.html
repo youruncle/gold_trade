@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>贵金属交易工作台</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Precious Metals Desk</p>
+          <h1>贵金属交易工作台</h1>
+        </div>
+        <div class="status-pill" id="dataStatus">连接行情中</div>
+      </header>
+
+      <section class="market-strip" id="marketStrip"></section>
+
+      <section class="workspace">
+        <aside class="left-rail">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>品种</h2>
+            </div>
+            <div class="asset-list" id="assetList"></div>
+          </div>
+
+          <div class="panel compact">
+            <div class="panel-head">
+              <h2>指标</h2>
+            </div>
+            <div class="metric-grid">
+              <div>
+                <span>MA20</span>
+                <strong id="ma20">--</strong>
+              </div>
+              <div>
+                <span>MA60</span>
+                <strong id="ma60">--</strong>
+              </div>
+              <div>
+                <span>RSI</span>
+                <strong id="rsi">--</strong>
+              </div>
+              <div>
+                <span>30日波动</span>
+                <strong id="volatility">--</strong>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="chart-zone">
+          <div class="panel chart-panel">
+            <div class="chart-header">
+              <div>
+                <p class="eyebrow" id="assetTicker">GC=F</p>
+                <h2 id="assetName">黄金期货</h2>
+              </div>
+              <div class="price-block">
+                <strong id="activePrice">--</strong>
+                <span id="activeChange">--</span>
+              </div>
+              <div class="segmented" id="rangeTabs">
+                <button data-range="1D">1D</button>
+                <button data-range="1M">1M</button>
+                <button data-range="3M" class="active">3M</button>
+                <button data-range="1Y">1Y</button>
+                <button data-range="5Y">5Y</button>
+              </div>
+              <div class="segmented chart-type" id="chartTypeTabs">
+                <button data-chart-type="line" class="active">线</button>
+                <button data-chart-type="candle">K</button>
+              </div>
+            </div>
+            <canvas id="priceChart" height="360"></canvas>
+          </div>
+
+          <article class="panel decision-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Decision Support</p>
+                <h2>大模型决策辅助</h2>
+              </div>
+              <button class="ghost" id="exportHistory" title="导出当前品种历史数据">导出CSV</button>
+            </div>
+            <div class="decision-grid">
+              <div class="decision-call">
+                <span>当前动作</span>
+                <strong id="decisionAction">--</strong>
+                <em id="decisionConfidence">--</em>
+              </div>
+              <div class="decision-copy" id="decisionText"></div>
+            </div>
+            <div class="factor-grid" id="decisionFactors"></div>
+            <details class="model-brief">
+              <summary>给大模型复核的市场摘要</summary>
+              <pre id="modelBrief"></pre>
+            </details>
+          </article>
+
+          <section class="ops-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Signal Radar</p>
+                  <h2>信号雷达</h2>
+                </div>
+              </div>
+              <div class="radar-list" id="signalRadar"></div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Trade Plan</p>
+                  <h2>交易计划</h2>
+                </div>
+              </div>
+              <label>
+                单笔风险比例
+                <input id="riskPercent" type="number" min="0.1" max="10" step="0.1" value="1" />
+              </label>
+              <div class="plan-grid" id="tradePlan"></div>
+            </article>
+          </section>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Strategy Lab</p>
+                <h2>策略回测</h2>
+              </div>
+            </div>
+            <div class="backtest-controls">
+              <label>
+                策略
+                <select id="strategySelect">
+                  <option value="maCross">MA20 / MA60 趋势</option>
+                  <option value="rsiRevert">RSI 均值回归</option>
+                  <option value="breakout">120日突破</option>
+                </select>
+              </label>
+              <button class="primary" id="runBacktest">运行回测</button>
+            </div>
+            <div class="backtest-grid" id="backtestResult"></div>
+          </article>
+
+          <div class="insight-row">
+            <article class="panel">
+              <div class="panel-head">
+                <h2>历史趋势</h2>
+              </div>
+              <div class="trend-copy" id="trendText"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head">
+                <h2>策略摘要</h2>
+              </div>
+              <div class="strategy-copy" id="strategyText"></div>
+            </article>
+          </div>
+        </section>
+
+        <aside class="trade-rail">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>虚拟交易</h2>
+              <button class="ghost" id="resetAccount" title="重置账户">重置</button>
+            </div>
+            <div class="account-total">
+              <span>总权益</span>
+              <strong id="equity">--</strong>
+              <em id="pnl">--</em>
+            </div>
+            <form id="tradeForm" class="trade-form">
+              <label>
+                方向
+                <select id="side">
+                  <option value="buy">买入</option>
+                  <option value="sell">卖出</option>
+                </select>
+              </label>
+              <label>
+                数量
+                <input id="quantity" type="number" min="0.01" step="0.01" value="1" />
+              </label>
+              <button type="submit" class="primary">提交委托</button>
+            </form>
+          </div>
+
+          <div class="panel positions">
+            <div class="panel-head">
+              <h2>持仓</h2>
+            </div>
+            <div id="positions"></div>
+          </div>
+
+          <div class="panel trades">
+            <div class="panel-head">
+              <h2>成交</h2>
+            </div>
+            <div id="tradeLog"></div>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
