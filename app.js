@@ -208,7 +208,8 @@ async function loadMacroData() {
 function sliceSeries(key) {
   if (!history[key]) return [];
   if (activeRange === "1D") {
-    return intradayHistory[key]?.length > 1 ? intradayHistory[key] : [];
+    const intraday = intradayHistory[key] || [];
+    return intraday.length > 1 ? intraday.slice(-288) : [];
   }
   const days = ranges[activeRange];
   return history[key].slice(-Math.min(days, history[key].length));

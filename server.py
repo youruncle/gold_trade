@@ -104,7 +104,7 @@ def fetch_yahoo(asset_key):
     asset = ASSETS[asset_key]
     symbol = asset["symbol"].replace("=", "%3D")
     daily = fetch_yahoo_chart(symbol, "5y", "1d")
-    intraday = fetch_yahoo_chart(symbol, "1d", "5m")
+    intraday = fetch_yahoo_chart(symbol, "5d", "5m")
 
     if len(daily["points"]) < 30:
         raise ValueError("Market provider returned incomplete daily history")
