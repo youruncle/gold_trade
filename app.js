@@ -53,9 +53,11 @@ let account = loadAccount();
 let alerts = loadAlerts();
 let chartState = null;
 let hoverIndex = null;
+let marketRequestId = 0;
 
 const els = {
   dataStatus: document.querySelector("#dataStatus"),
+  retryData: document.querySelector("#retryData"),
   marketStrip: document.querySelector("#marketStrip"),
   assetList: document.querySelector("#assetList"),
   assetTicker: document.querySelector("#assetTicker"),
@@ -130,11 +132,36 @@ function saveAlerts() {
   localStorage.setItem(alertStoreKey, JSON.stringify(alerts));
 }
 
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 45000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchYahooSeries(assetKey) {
   const url = `/api/market/${assetKey}`;
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) throw new Error(`行情代理返回 ${response.status}`);
-  const data = await response.json();
+  let data = null;
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetchWithTimeout(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`行情代理返回 ${response.status}`);
+      data = await response.json();
+      break;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) await wait(900);
+    }
+  }
+
+  if (!data) throw new Error(lastError?.name === "AbortError" ? "行情请求超时" : lastError?.message || "行情接口不可用");
   if (data.error) throw new Error(data.error);
   const points = (data.points || []).map(point => ({
     date: new Date(point.date),
@@ -159,26 +186,57 @@ async function fetchYahooSeries(assetKey) {
 }
 
 async function loadMarketData() {
+  const requestId = ++marketRequestId;
   const keys = Object.keys(assets);
   els.dataStatus.textContent = "连接行情中";
-  const results = await Promise.all(keys.map(async key => {
+  els.retryData.disabled = true;
+
+  history = {};
+  intradayHistory = {};
+  dataErrors = {};
+  liveSource = "无数据";
+  render();
+
+  const updateStatus = (completed, final = false) => {
+    const loaded = Object.keys(history).length;
+    liveSource = loaded ? "真实" : "无数据";
+    if (loaded) {
+      els.dataStatus.textContent = `${liveSource}行情 ${loaded}/${keys.length} · Yahoo/COMEX · ${completed}/${keys.length}完成`;
+    } else if (final) {
+      els.dataStatus.textContent = `真实行情连接失败 · ${Object.keys(dataErrors).length}项错误`;
+    } else {
+      els.dataStatus.textContent = `连接行情中 · ${completed}/${keys.length}完成`;
+    }
+  };
+
+  let completed = 0;
+  await Promise.all(keys.map(async key => {
     try {
       const payload = await fetchYahooSeries(key);
-      return [key, payload, null];
+      if (requestId !== marketRequestId) return;
+      history[key] = payload.points;
+      intradayHistory[key] = payload.intradayPoints;
+      if (!history[activeAsset]) activeAsset = key;
     } catch (error) {
-      return [key, null, error.message || "行情接口不可用"];
+      if (requestId !== marketRequestId) return;
+      dataErrors[key] = error.message || "行情接口不可用";
+    } finally {
+      if (requestId === marketRequestId) {
+        completed += 1;
+        render();
+        updateStatus(completed);
+      }
     }
   }));
 
-  history = Object.fromEntries(results.filter(([, payload]) => payload).map(([key, payload]) => [key, payload.points]));
-  intradayHistory = Object.fromEntries(results.filter(([, payload]) => payload).map(([key, payload]) => [key, payload.intradayPoints]));
-  dataErrors = Object.fromEntries(results.filter(([, payload]) => !payload).map(([key, , error]) => [key, error]));
+  if (requestId !== marketRequestId) return;
   const loaded = Object.keys(history).length;
   liveSource = loaded ? "真实" : "无数据";
   render();
   els.dataStatus.textContent = loaded
     ? `${liveSource}行情 ${loaded}/${keys.length} · Yahoo/COMEX · ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
-    : "真实行情连接失败";
+    : `真实行情连接失败 · ${Object.keys(dataErrors).length}项错误`;
+  els.retryData.disabled = false;
 }
 
 async function loadMacroData() {
@@ -1326,6 +1384,10 @@ window.addEventListener("resize", renderChart);
 els.riskPercent.addEventListener("input", () => renderTradePlan(history[activeAsset]));
 els.strategySelect.addEventListener("change", () => renderBacktest(history[activeAsset]));
 els.runBacktest.addEventListener("click", () => renderBacktest(history[activeAsset]));
+els.retryData.addEventListener("click", () => {
+  loadMarketData();
+  loadMacroData();
+});
 
 els.alertForm.addEventListener("submit", event => {
   event.preventDefault();

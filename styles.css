@@ -61,6 +61,12 @@ button {
   margin-bottom: 18px;
 }
 
+.status-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .eyebrow {
   margin: 0 0 5px;
   color: var(--blue);
@@ -102,6 +108,12 @@ h2 {
   text-align: center;
   font-size: 13px;
   font-weight: 800;
+}
+
+.status-retry {
+  min-height: 39px;
+  padding-inline: 12px;
+  white-space: nowrap;
 }
 
 .market-strip {
@@ -826,6 +838,14 @@ textarea {
   .left-rail {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .status-group {
+    justify-content: stretch;
+  }
+
+  .status-pill {
+    flex: 1;
   }
 
   .price-block {
