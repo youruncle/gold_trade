@@ -36,6 +36,10 @@ const assets = {
 const ranges = { "1D": 1, "1M": 30, "3M": 90, "1Y": 365, "5Y": 1260 };
 const storeKey = "metal-desk-account-v1";
 const alertStoreKey = "metal-desk-alerts-v1";
+const marketCacheKey = "metal-desk-market-cache-v1";
+const marketCacheMaxAgeMs = 72 * 60 * 60 * 1000;
+const marketMaxAttempts = 4;
+const marketTimeoutMs = 75000;
 const fmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 const money = value => `$${fmt.format(value)}`;
 const pct = value => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
@@ -132,9 +136,61 @@ function saveAlerts() {
   localStorage.setItem(alertStoreKey, JSON.stringify(alerts));
 }
 
+function reviveSeries(series = []) {
+  return series.map(point => ({
+    ...point,
+    date: new Date(point.date)
+  })).filter(point => Number.isFinite(point.price) && !Number.isNaN(point.date.getTime()));
+}
+
+function plainSeries(series = []) {
+  return series.map(point => ({
+    ...point,
+    date: point.date instanceof Date ? point.date.getTime() : new Date(point.date).getTime()
+  }));
+}
+
+function formatSyncTime(time) {
+  return new Date(time).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function saveMarketCache() {
+  const loaded = Object.keys(history).length;
+  if (!loaded) return;
+  const payload = {
+    savedAt: Date.now(),
+    history: Object.fromEntries(Object.entries(history).map(([key, series]) => [key, plainSeries(series)])),
+    intradayHistory: Object.fromEntries(Object.entries(intradayHistory).map(([key, series]) => [key, plainSeries(series)]))
+  };
+  localStorage.setItem(marketCacheKey, JSON.stringify(payload));
+}
+
+function restoreMarketCache() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(marketCacheKey));
+    if (!cached?.savedAt || Date.now() - cached.savedAt > marketCacheMaxAgeMs) return null;
+    history = Object.fromEntries(Object.entries(cached.history || {}).map(([key, series]) => [key, reviveSeries(series)]));
+    intradayHistory = Object.fromEntries(Object.entries(cached.intradayHistory || {}).map(([key, series]) => [key, reviveSeries(series)]));
+    if (!Object.keys(history).length) return null;
+    if (!history[activeAsset]) activeAsset = Object.keys(history)[0];
+    liveSource = "缓存";
+    dataErrors = {};
+    render();
+    els.dataStatus.textContent = `离线缓存 ${Object.keys(history).length}/${Object.keys(assets).length} · 上次真实同步 ${formatSyncTime(cached.savedAt)}`;
+    return cached;
+  } catch {
+    return null;
+  }
+}
+
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = 45000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = marketTimeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -149,7 +205,7 @@ async function fetchYahooSeries(assetKey) {
   let data = null;
   let lastError = null;
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < marketMaxAttempts; attempt += 1) {
     try {
       const response = await fetchWithTimeout(url, { cache: "no-store" });
       if (!response.ok) throw new Error(`行情代理返回 ${response.status}`);
@@ -157,7 +213,7 @@ async function fetchYahooSeries(assetKey) {
       break;
     } catch (error) {
       lastError = error;
-      if (attempt === 0) await wait(900);
+      if (attempt < marketMaxAttempts - 1) await wait(1200 + attempt * 1600);
     }
   }
 
@@ -188,22 +244,21 @@ async function fetchYahooSeries(assetKey) {
 async function loadMarketData() {
   const requestId = ++marketRequestId;
   const keys = Object.keys(assets);
-  els.dataStatus.textContent = "连接行情中";
+  const hadData = Object.keys(history).length > 0;
+  els.dataStatus.textContent = hadData ? `正在更新真实行情 · 保留上次数据` : "连接行情中";
   els.retryData.disabled = true;
-
-  history = {};
-  intradayHistory = {};
   dataErrors = {};
-  liveSource = "无数据";
-  render();
 
   const updateStatus = (completed, final = false) => {
     const loaded = Object.keys(history).length;
     liveSource = loaded ? "真实" : "无数据";
-    if (loaded) {
+    const failed = Object.keys(dataErrors).length;
+    if (loaded && final && failed) {
+      els.dataStatus.textContent = `实时更新部分失败 · 保留真实行情 ${loaded}/${keys.length} · ${failed}项错误`;
+    } else if (loaded) {
       els.dataStatus.textContent = `${liveSource}行情 ${loaded}/${keys.length} · Yahoo/COMEX · ${completed}/${keys.length}完成`;
     } else if (final) {
-      els.dataStatus.textContent = `真实行情连接失败 · ${Object.keys(dataErrors).length}项错误`;
+      els.dataStatus.textContent = `真实行情连接失败 · ${failed}项错误`;
     } else {
       els.dataStatus.textContent = `连接行情中 · ${completed}/${keys.length}完成`;
     }
@@ -217,6 +272,7 @@ async function loadMarketData() {
       history[key] = payload.points;
       intradayHistory[key] = payload.intradayPoints;
       if (!history[activeAsset]) activeAsset = key;
+      saveMarketCache();
     } catch (error) {
       if (requestId !== marketRequestId) return;
       dataErrors[key] = error.message || "行情接口不可用";
@@ -233,9 +289,11 @@ async function loadMarketData() {
   const loaded = Object.keys(history).length;
   liveSource = loaded ? "真实" : "无数据";
   render();
-  els.dataStatus.textContent = loaded
-    ? `${liveSource}行情 ${loaded}/${keys.length} · Yahoo/COMEX · ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`
-    : `真实行情连接失败 · ${Object.keys(dataErrors).length}项错误`;
+  saveMarketCache();
+  updateStatus(keys.length, true);
+  if (loaded && !Object.keys(dataErrors).length) {
+    els.dataStatus.textContent = `${liveSource}行情 ${loaded}/${keys.length} · Yahoo/COMEX · ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`;
+  }
   els.retryData.disabled = false;
 }
 
@@ -1420,6 +1478,7 @@ els.chart.addEventListener("pointerleave", () => {
   renderChart();
 });
 
+restoreMarketCache();
 loadMarketData();
 loadMacroData();
 setInterval(() => {
