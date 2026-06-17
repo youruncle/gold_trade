@@ -83,8 +83,7 @@ const els = {
   decisionText: document.querySelector("#decisionText"),
   decisionFactors: document.querySelector("#decisionFactors"),
   modelBrief: document.querySelector("#modelBrief"),
-  exportHistory: document.querySelector("#exportHistory")
-  ,
+  exportHistory: document.querySelector("#exportHistory"),
   chartTypeTabs: document.querySelector("#chartTypeTabs"),
   signalRadar: document.querySelector("#signalRadar"),
   riskPercent: document.querySelector("#riskPercent"),
@@ -92,6 +91,11 @@ const els = {
   strategySelect: document.querySelector("#strategySelect"),
   runBacktest: document.querySelector("#runBacktest"),
   backtestResult: document.querySelector("#backtestResult"),
+  optionCycleDays: document.querySelector("#optionCycleDays"),
+  optionStrikePct: document.querySelector("#optionStrikePct"),
+  optionPremiumPct: document.querySelector("#optionPremiumPct"),
+  optionResult: document.querySelector("#optionResult"),
+  optionText: document.querySelector("#optionText"),
   macroGrid: document.querySelector("#macroGrid"),
   macroText: document.querySelector("#macroText"),
   tradeReason: document.querySelector("#tradeReason"),
@@ -536,6 +540,137 @@ function runStrategyBacktest(series, strategy) {
   };
 }
 
+function equityDrawdown(curve) {
+  return curve.reduce((state, point) => {
+    state.peak = Math.max(state.peak, point.equity);
+    if (state.peak) state.drawdown = Math.min(state.drawdown, ((point.equity - state.peak) / state.peak) * 100);
+    return state;
+  }, { peak: curve[0]?.equity || 100000, drawdown: 0 }).drawdown;
+}
+
+function buildHoldComparison(series, startCapital) {
+  const start = series[0]?.price;
+  if (!start) return null;
+  const qty = startCapital / start;
+  const curve = series.map(point => ({ date: point.date, equity: qty * point.price }));
+  const finalEquity = curve.at(-1).equity;
+  return {
+    name: "普通交易",
+    caption: "一次性买入并持有当前品种",
+    totalReturn: ((finalEquity - startCapital) / startCapital) * 100,
+    maxDrawdown: equityDrawdown(curve),
+    winRate: null,
+    events: 1,
+    income: 0,
+    finalEquity,
+    curve
+  };
+}
+
+function buildSellPutComparison(series, startCapital, cycleDays, strikePct, premiumPct) {
+  let equity = startCapital;
+  let wins = 0;
+  let assignments = 0;
+  let cycles = 0;
+  let income = 0;
+  const curve = [{ date: series[0].date, equity }];
+
+  for (let i = 0; i + cycleDays < series.length; i += cycleDays) {
+    const entry = series[i].price;
+    const expiry = series[i + cycleDays].price;
+    const strike = entry * (1 - strikePct / 100);
+    const premium = entry * (premiumPct / 100) * (cycleDays / 30);
+    const units = equity / strike;
+    const payoff = premium - Math.max(strike - expiry, 0);
+    const pnl = units * payoff;
+
+    equity += pnl;
+    income += units * premium;
+    wins += pnl > 0 ? 1 : 0;
+    assignments += expiry < strike ? 1 : 0;
+    cycles += 1;
+    curve.push({ date: series[i + cycleDays].date, equity });
+  }
+
+  return {
+    name: "Sell Put",
+    caption: "现金担保卖出看跌，跌破行权价时承担下行",
+    totalReturn: ((equity - startCapital) / startCapital) * 100,
+    maxDrawdown: equityDrawdown(curve),
+    winRate: cycles ? (wins / cycles) * 100 : 0,
+    events: assignments,
+    eventLabel: "被指派",
+    income,
+    finalEquity: equity,
+    curve
+  };
+}
+
+function buildSellCallComparison(series, startCapital, cycleDays, strikePct, premiumPct) {
+  const start = series[0]?.price;
+  if (!start) return null;
+  let equity = startCapital;
+  let wins = 0;
+  let called = 0;
+  let cycles = 0;
+  let income = 0;
+  const curve = [{ date: series[0].date, equity }];
+
+  for (let i = 0; i + cycleDays < series.length; i += cycleDays) {
+    const entry = series[i].price;
+    const expiry = series[i + cycleDays].price;
+    const units = equity / entry;
+    const strike = entry * (1 + strikePct / 100);
+    const premium = entry * (premiumPct / 100) * (cycleDays / 30);
+    const cappedPrice = Math.min(expiry, strike);
+    const nextEquity = units * (cappedPrice + premium);
+
+    wins += nextEquity > equity ? 1 : 0;
+    called += expiry > strike ? 1 : 0;
+    income += units * premium;
+    equity = nextEquity;
+    cycles += 1;
+    curve.push({ date: series[i + cycleDays].date, equity });
+  }
+
+  return {
+    name: "Sell Call",
+    caption: "备兑卖出看涨，收取权利金但上行收益被封顶",
+    totalReturn: ((equity - startCapital) / startCapital) * 100,
+    maxDrawdown: equityDrawdown(curve),
+    winRate: cycles ? (wins / cycles) * 100 : 0,
+    events: called,
+    eventLabel: "被行权",
+    income,
+    finalEquity: equity,
+    curve
+  };
+}
+
+function runOptionComparison(series) {
+  const cycleDays = Number(els.optionCycleDays.value) || 30;
+  const strikePct = Math.max(1, Number(els.optionStrikePct.value) || 5);
+  const premiumPct = Math.max(0.1, Number(els.optionPremiumPct.value) || 1.5);
+  const startCapital = 100000;
+  const needed = Math.max(120, cycleDays * 4);
+  const sample = series.slice(-Math.min(series.length, 756));
+
+  if (sample.length < needed) return null;
+
+  return {
+    cycleDays,
+    strikePct,
+    premiumPct,
+    startCapital,
+    sample,
+    items: [
+      buildHoldComparison(sample, startCapital),
+      buildSellPutComparison(sample, startCapital, cycleDays, strikePct, premiumPct),
+      buildSellCallComparison(sample, startCapital, cycleDays, strikePct, premiumPct)
+    ].filter(Boolean)
+  };
+}
+
 function positions() {
   const map = {};
   account.trades.forEach(trade => {
@@ -931,6 +1066,47 @@ function renderBacktest(series) {
   `;
 }
 
+function renderOptionComparison(series) {
+  if (!series) {
+    els.optionResult.innerHTML = `<p class="empty">暂无真实历史数据</p>`;
+    els.optionText.innerHTML = `<p>没有真实日线时不运行期权卖方策略模拟。</p>`;
+    return;
+  }
+
+  const comparison = runOptionComparison(series);
+  if (!comparison) {
+    els.optionResult.innerHTML = `<p class="empty">历史样本不足，无法完成 Sell Put / Sell Call 对比</p>`;
+    els.optionText.innerHTML = `<p>至少需要覆盖数个完整卖方周期，当前样本不足。</p>`;
+    return;
+  }
+
+  const best = comparison.items.reduce((winner, item) => item.finalEquity > winner.finalEquity ? item : winner, comparison.items[0]);
+  els.optionResult.innerHTML = comparison.items.map(item => `
+    <div class="option-card ${item.name === best.name ? "best" : ""}">
+      <div class="option-card-head">
+        <strong>${item.name}</strong>
+        <span>${item.name === best.name ? "样本期领先" : "对比组"}</span>
+      </div>
+      <p>${item.caption}</p>
+      <dl>
+        <div><dt>期末权益</dt><dd>${money(item.finalEquity)}</dd></div>
+        <div><dt>总收益</dt><dd class="${item.totalReturn >= 0 ? "up" : "down"}">${pct(item.totalReturn)}</dd></div>
+        <div><dt>最大回撤</dt><dd class="down">${pct(item.maxDrawdown)}</dd></div>
+        <div><dt>${item.eventLabel || "持仓次数"}</dt><dd>${item.events}</dd></div>
+        <div><dt>周期胜率</dt><dd>${item.winRate === null ? "--" : `${item.winRate.toFixed(1)}%`}</dd></div>
+        <div><dt>权利金收入</dt><dd>${money(item.income)}</dd></div>
+      </dl>
+    </div>
+  `).join("");
+
+  const startDate = comparison.sample[0].date.toLocaleDateString("zh-CN");
+  const endDate = comparison.sample.at(-1).date.toLocaleDateString("zh-CN");
+  els.optionText.innerHTML = `
+    <p>样本区间 ${startDate} - ${endDate}，周期 ${comparison.cycleDays} 天，行权价距离 ${comparison.strikePct.toFixed(1)}%，权利金按标的价格的 ${comparison.premiumPct.toFixed(1)}% / 30天估算。</p>
+    <p>这是用于策略比较的简化模型，不包含真实期权链报价、隐含波动率、希腊值、手续费、保证金变化、提前行权和滑点。</p>
+  `;
+}
+
 function renderMacro() {
   const items = Object.values(macroHistory);
   if (!items.length) {
@@ -1037,6 +1213,7 @@ function render() {
   renderSignalRadar(series);
   renderTradePlan(series);
   renderBacktest(series);
+  renderOptionComparison(series);
   renderAlerts();
 }
 
@@ -1118,6 +1295,12 @@ els.resetAccount.addEventListener("click", () => {
   account = { cash: 100000, trades: [], realized: 0 };
   saveAccount();
   render();
+});
+
+["change", "input"].forEach(eventName => {
+  [els.optionCycleDays, els.optionStrikePct, els.optionPremiumPct].forEach(control => {
+    control.addEventListener(eventName, () => renderOptionComparison(history[activeAsset]));
+  });
 });
 
 els.exportHistory.addEventListener("click", () => {

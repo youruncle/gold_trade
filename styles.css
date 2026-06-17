@@ -459,6 +459,95 @@ select:disabled {
   gap: 12px;
 }
 
+.option-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.option-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.option-card {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.option-card.best {
+  border-color: rgba(19, 121, 91, 0.42);
+  background: #f3fbf7;
+}
+
+.option-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.option-card-head strong {
+  font-size: 16px;
+}
+
+.option-card-head span {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #edf2f7;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.option-card.best .option-card-head span {
+  background: #dff6eb;
+  color: var(--green);
+}
+
+.option-card p {
+  min-height: 42px;
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.option-card dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.option-card dl div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.option-card dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.option-card dd {
+  margin: 0;
+  font-weight: 700;
+  text-align: right;
+}
+
+.option-note {
+  margin-top: 14px;
+}
+
 .macro-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -763,6 +852,8 @@ textarea {
   .plan-grid,
   .backtest-grid,
   .backtest-controls,
+  .option-controls,
+  .option-grid,
   .macro-grid {
     grid-template-columns: 1fr;
   }

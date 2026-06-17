@@ -151,6 +151,36 @@
           <article class="panel">
             <div class="panel-head">
               <div>
+                <p class="eyebrow">Options Overlay</p>
+                <h2>Sell Put / Sell Call 对比</h2>
+              </div>
+            </div>
+            <div class="option-controls">
+              <label>
+                周期天数
+                <select id="optionCycleDays">
+                  <option value="21">21天</option>
+                  <option value="30" selected>30天</option>
+                  <option value="45">45天</option>
+                  <option value="60">60天</option>
+                </select>
+              </label>
+              <label>
+                行权价距离 %
+                <input id="optionStrikePct" type="number" min="1" max="20" step="0.5" value="5" />
+              </label>
+              <label>
+                权利金比例 %
+                <input id="optionPremiumPct" type="number" min="0.1" max="10" step="0.1" value="1.5" />
+              </label>
+            </div>
+            <div class="option-grid" id="optionResult"></div>
+            <div class="trend-copy option-note" id="optionText"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
                 <p class="eyebrow">Macro Drivers</p>
                 <h2>宏观驱动</h2>
               </div>
